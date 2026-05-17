@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import {
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
+import { GripVertical } from "lucide-react";
 import TaskLibrary from "../components/Routine/TaskLibrary";
 import WeeklyGrid from "../components/Routine/WeeklyGrid";
 import TaskFormModal from "../components/Task/TaskFormModal";
@@ -26,6 +28,7 @@ export default function RoutineBuilder() {
   const [savedRoutines, setSavedRoutines] = useState([]);
   const [loadingRoutines, setLoadingRoutines] = useState(false);
   const [description, setDescription] = useState("");
+  const [activeDragTask, setActiveDragTask] = useState(null);
 
   // Configure sensors for drag-and-drop (mouse + keyboard)
   const sensors = useSensors(
@@ -105,8 +108,13 @@ export default function RoutineBuilder() {
     setIsSaveModalOpen(true);
   };
 
-  /* ---------------- DRAG END HANDLER ---------------- */
+  /* ---------------- DRAG HANDLERS ---------------- */
+  const handleDragStart = (event) => {
+    setActiveDragTask(event.active.data.current?.task ?? null);
+  };
+
   const handleDragEnd = (event) => {
+    setActiveDragTask(null);
     const { active, over } = event;
     if (!over) return;
 
@@ -127,7 +135,7 @@ export default function RoutineBuilder() {
   };
 
   return (
-    <DndContext onDragEnd={handleDragEnd} sensors={sensors}>
+    <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd} sensors={sensors}>
       <div className="app-bg min-h-screen px-6 py-8 animate-in">
         {/* Header */}
         <header className="mb-8 flex items-start gap-4 animate-in delay-100">
@@ -148,7 +156,7 @@ export default function RoutineBuilder() {
 
         {/* Main Layout */}
         <div className="grid grid-cols-12 gap-6 animate-in delay-200">
-          <aside className="col-span-12 md:col-span-3">
+          <aside className="col-span-12 md:col-span-3 md:sticky md:top-6 md:self-start">
             <TaskLibrary onAddTask={() => setIsModalOpen(true)} />
           </aside>
 
@@ -188,43 +196,55 @@ export default function RoutineBuilder() {
                   return acc;
                 }, {});
 
+                const allTasks = Object.values(tasksByDay)
+                  .flat()
+                  .sort((a, b) => a.startTime - b.startTime);
+
                 return (
                   <div
                     key={routine._id}
-                    className="card card-primary hover:shadow-md transition p-4"
+                    className="card card-primary hover:shadow-lg transition-all p-5"
                   >
-                    <h3 className="font-medium text-main mb-2">
-                      {routine.name}
-                    </h3>
-
-                    {routine.description && (
-                      <p className="text-xs text-muted mb-3 italic">
-                        {routine.description}
-                      </p>
-                    )}
-
-                    {Object.keys(tasksByDay).map((day) => (
-                      <div key={day} className="mb-2">
-                        <p className="text-sm font-semibold text-main">{day}</p>
-                        <ul className="text-xs text-muted ml-3">
-                          {tasksByDay[day]
-                            .sort((a, b) => a.startTime - b.startTime)
-                            .map((task) => {
-                              const hours = String(
-                                Math.floor(task.startTime / 60)
-                              ).padStart(2, "0");
-                              const minutes = String(
-                                task.startTime % 60
-                              ).padStart(2, "0");
-                              return (
-                                <li key={task._id}>
-                                  {hours}:{minutes} – {task.title}
-                                </li>
-                              );
-                            })}
-                        </ul>
+                    {/* Card header */}
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-main text-sm leading-snug truncate">
+                          {routine.name}
+                        </h3>
+                        {routine.description && (
+                          <p className="text-xs text-muted mt-0.5 italic line-clamp-1">
+                            {routine.description}
+                          </p>
+                        )}
                       </div>
-                    ))}
+                      <span className="ml-2 shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#d0f6e3] text-[#3b8ea0]">
+                        {allTasks.length} task{allTasks.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+
+                    {/* Task list — no day heading (already in routine name) */}
+                    <div className="space-y-1.5">
+                      {allTasks.map((task) => {
+                        const hours = String(
+                          Math.floor(task.startTime / 60)
+                        ).padStart(2, "0");
+                        const minutes = String(
+                          task.startTime % 60
+                        ).padStart(2, "0");
+                        return (
+                          <div
+                            key={task._id}
+                            className="flex items-center gap-2 text-xs"
+                          >
+                            <span className="font-mono font-semibold text-[#4eb7b3] shrink-0 w-10">
+                              {hours}:{minutes}
+                            </span>
+                            <span className="w-px h-3 bg-[#98e1d7] shrink-0" />
+                            <span className="text-main truncate">{task.title}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
@@ -240,6 +260,29 @@ export default function RoutineBuilder() {
           />
         )}
       </div>
+
+      {/* ===== Drag Overlay (floating card while dragging) ===== */}
+      <DragOverlay dropAnimation={null}>
+        {activeDragTask && (
+          <div className="flex items-center gap-2 rounded-xl border-soft bg-white p-3 shadow-xl w-52 cursor-grabbing opacity-95">
+            <GripVertical size={14} className="shrink-0 text-muted opacity-40" />
+            <span
+              className="h-2.5 w-2.5 rounded-full shrink-0"
+              style={{
+                backgroundColor:
+                  activeDragTask.priority === "High"
+                    ? "#ef4444"
+                    : activeDragTask.priority === "Medium"
+                    ? "#f59e0b"
+                    : "#10b981",
+              }}
+            />
+            <p className="flex-1 text-sm font-medium text-main truncate">
+              {activeDragTask.title}
+            </p>
+          </div>
+        )}
+      </DragOverlay>
 
       {isSaveModalOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 animate-in">
