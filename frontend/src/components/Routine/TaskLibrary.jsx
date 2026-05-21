@@ -21,9 +21,14 @@ function DraggableTask({ task }) {
     });
 
   const style = {
-    transform: transform
-      ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
-      : undefined,
+    transform: isDragging
+      ? undefined
+      : transform
+        ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
+        : undefined,
+    opacity: isDragging ? 0 : 1,
+    position: "relative",
+    zIndex: isDragging ? 99999 : 1,
   };
 
   const priorityColor = PRIORITY_COLOR[task.priority] ?? "#10b981";
@@ -34,14 +39,9 @@ function DraggableTask({ task }) {
       style={style}
       {...listeners}
       {...attributes}
-      className={`group flex items-center gap-2 rounded-xl p-3
+      className="group flex items-center gap-3 rounded-xl border-soft bg-black/200 dark:bg-slate-800/80 p-3
                  cursor-grab active:cursor-grabbing
-                 transition-all duration-150 hover-lift
-                 ${
-                   isDragging
-                     ? "opacity-40 border-2 border-dashed border-[#4eb7b3] bg-[#d0f6e3]/60 shadow-none"
-                     : "border-soft bg-white/80 hover:bg-white hover:shadow-md"
-                 }`}
+                 hover:bg-white dark:hover:bg-slate-800 hover:shadow-md transition hover-lift"
       role="button"
       tabIndex={0}
       aria-label={`${task.title} - Drag to schedule or use arrow keys`}
@@ -56,6 +56,15 @@ function DraggableTask({ task }) {
       <span
         className="h-2.5 w-2.5 rounded-full shrink-0"
         style={{ backgroundColor: priorityColor }}
+        className="h-3 w-3 rounded-full"
+        style={{
+          backgroundColor:
+            task.priority === "High"
+              ? "#ef4444"
+              : task.priority === "Medium"
+                ? "#f59e0b"
+                : "#10b981",
+        }}
       />
 
       {/* Title */}
@@ -78,8 +87,7 @@ function DraggableTask({ task }) {
 }
 
 /* ---------------- Task Library ---------------- */
-export default function TaskLibrary({ onAddTask }) {
-  const { tasks } = useTasks();
+export default function TaskLibrary({ tasks, onAddTask }) {
   
   const [query, setQuery] = useState("");
 
@@ -92,10 +100,12 @@ export default function TaskLibrary({ onAddTask }) {
       {/* Header */}
       <div className="mb-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold text-main">Task Library</h2>
-          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#d0f6e3] text-[#3b8ea0]">
-            {filteredTasks?.length ?? 0}
-          </span>
+          <h2 className="text-lg font-semibold text-gray-500">
+  Task Library
+</h2>
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-soft text-gray-500">
+  {filteredTasks?.length ?? 0}
+</span>
         </div>
         <p className="text-xs text-muted mt-0.5">Drag tasks onto the grid</p>
       </div>
@@ -120,6 +130,13 @@ export default function TaskLibrary({ onAddTask }) {
           <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
         </svg>
       </div>
+      <input
+  type="text"
+  placeholder="Search tasks…"
+  value={query}
+  onChange={(e) => setQuery(e.target.value)}
+  className="mb-4 rounded-xl border-soft px-3 py-2 text-sm focus:outline-none bg-transparent text-gray-500 placeholder:text-gray-500"
+/>
 
       {/* Task List — scrollable, sized to content up to max */}
       <div className="overflow-y-auto max-h-[55vh] min-h-[60px] space-y-2.5 pr-0.5">

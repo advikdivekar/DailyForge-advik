@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -11,11 +11,13 @@ import { GripVertical } from "lucide-react";
 import TaskLibrary from "../components/Routine/TaskLibrary";
 import WeeklyGrid from "../components/Routine/WeeklyGrid";
 import TaskFormModal from "../components/Task/TaskFormModal";
+import RoutineCard from "../components/Routine/RoutineCard.jsx";
 import useTasks from "../hooks/useTasks.js";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import api from "../api/axios.js";
 import EmptyState from "../components/EmptyState";
+import { useScrollThenOpen } from "../hooks/useScrollThenOpen.js";
 
 export default function RoutineBuilder() {
   const { addTask, tasks } = useTasks();
@@ -27,8 +29,11 @@ export default function RoutineBuilder() {
   const [routineName, setRoutineName] = useState("");
   const [savedRoutines, setSavedRoutines] = useState([]);
   const [loadingRoutines, setLoadingRoutines] = useState(false);
+  const [activeRoutine, setActiveRoutine] = useState([]);
   const [description, setDescription] = useState("");
-  const [activeDragTask, setActiveDragTask] = useState(null);
+  const [activeTask, setActiveTask] = useState(null);
+
+  const normalizeDay = (day) => String(day || "").trim().toLowerCase();
 
   // Configure sensors for drag-and-drop (mouse + keyboard)
   const sensors = useSensors(
@@ -36,10 +41,16 @@ export default function RoutineBuilder() {
     useSensor(KeyboardSensor)
   );
 
+  // Modal open/close
+  const openModal = useCallback(() => setIsModalOpen(true), []);
+  const closeModal = useCallback(() => setIsModalOpen(false), []);
+
+  const handleOpenModal = useScrollThenOpen(openModal, 0);
+
   const handleSubmit = async (data) => {
     try {
       await addTask({ ...data, status: "Due" });
-      setIsModalOpen(false);
+      closeModal();
     } catch (err) {
       console.error(err);
       alert("Failed to add task");
@@ -50,11 +61,29 @@ export default function RoutineBuilder() {
     fetchRoutines();
   }, []);
 
+  useEffect(() => {
+
+  if (!savedRoutines.length) return;
+
+  const storedRoutineIds = JSON.parse(
+    localStorage.getItem("activeRoutineIds") || "[]"
+  );
+
+  if (!storedRoutineIds.length) return;
+
+  const restoredRoutines = savedRoutines.filter(
+    (routine) =>
+      storedRoutineIds.includes(routine._id)
+  );
+
+  setActiveRoutine(restoredRoutines);
+
+  }, [savedRoutines]);
+
   const fetchRoutines = async () => {
     try {
       setLoadingRoutines(true);
       const res = await api.get("/routines");
-      // res.data.routines is the array you need
       setSavedRoutines(
         Array.isArray(res.data.routines) ? res.data.routines : []
       );
@@ -79,7 +108,7 @@ export default function RoutineBuilder() {
     try {
       await api.post("/routines", {
         name: routineName,
-        description: description,
+        description,
         items,
       });
 
@@ -87,12 +116,12 @@ export default function RoutineBuilder() {
       setRoutineName("");
       setDescription("");
       setSelectedDay(null);
-
       alert("Routine saved successfully");
       await fetchRoutines();
     } catch (err) {
       console.error(err);
-      alert("Failed to save routine");
+      const errorMessage = err.response?.data?.message || "Failed to save routine";
+      alert(errorMessage);
     }
   };
 
@@ -102,7 +131,6 @@ export default function RoutineBuilder() {
       alert(`No tasks scheduled for ${day}`);
       return;
     }
-
     setSelectedDay(day);
     setRoutineName(`${day} Routine`);
     setIsSaveModalOpen(true);
@@ -111,41 +139,58 @@ export default function RoutineBuilder() {
   /* ---------------- DRAG HANDLERS ---------------- */
   const handleDragStart = (event) => {
     setActiveDragTask(event.active.data.current?.task ?? null);
+  /* ---------------- DRAG END HANDLER ---------------- */
+  // Removing Schedule task after drag
+  const removeScheduledTask = (taskId, day) => {
+
+    //filtering out 
+    setScheduledTasks((prev) =>
+      prev.filter(
+        (task) =>
+          !(
+            task.taskId === taskId &&
+            normalizeDay(task.day) === normalizeDay(day)
+          )
+      )
+    );
   };
 
   const handleDragEnd = (event) => {
     setActiveDragTask(null);
     const { active, over } = event;
     if (!over) return;
-
     const task = active.data.current?.task;
     if (!task) return;
     const { day, startTime } = over.data.current;
 
     setScheduledTasks((prev) => [
       ...prev.filter((t) => !(t.taskId === task._id && t.day === day)),
-      {
-        taskId: task._id,
-        title: task.title,
-        day,
-        startTime,
-        duration: 60,
-      },
+      { taskId: task._id, title: task.title, day, startTime, duration: 60 },
     ]);
   };
 
   return (
     <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd} sensors={sensors}>
       <div className="app-bg min-h-screen px-6 py-8 animate-in">
+    <DndContext
+      sensors={sensors}
+      onDragStart={(event) => setActiveTask(event.active.data.current?.task)}
+      onDragEnd={(event) => {
+        setActiveTask(null);
+        handleDragEnd(event);
+      }}
+    >
+      <div className="app-bg min-h-screen px-6 py-8 pb-40">
+
         {/* Header */}
         <header className="mb-8 flex items-start gap-4 animate-in delay-100">
           <button
             onClick={() => navigate("/dashboard")}
-            className="mt-1 rounded-lg p-2 border border-soft text-muted hover:bg-white transition cursor-pointer"
+            className="mt-1 rounded-lg p-2 border border-soft text-muted
+                       hover:bg-white transition cursor-pointer"
           >
             <ArrowLeft size={16} />
           </button>
-
           <div>
             <h1 className="text-3xl font-semibold text-main">
               Routine Builder
@@ -158,17 +203,29 @@ export default function RoutineBuilder() {
         <div className="grid grid-cols-12 gap-6 animate-in delay-200">
           <aside className="col-span-12 md:col-span-3 md:sticky md:top-6 md:self-start">
             <TaskLibrary onAddTask={() => setIsModalOpen(true)} />
+          <aside className="col-span-12 md:col-span-3">
+            <TaskLibrary
+  tasks={tasks}
+  onAddTask={() => setIsModalOpen(true)}
+/>
+            {/*
+             * TaskLibrary's "Add Task" button opens the modal directly
+             * (user is already at the top section of the page, no scroll needed).
+             * Use openModal instead of handleOpenModal here.
+             */}
+            <TaskLibrary onAddTask={openModal} />
           </aside>
 
           <section className="col-span-12 md:col-span-9">
             <WeeklyGrid
               scheduledTasks={scheduledTasks}
               onSaveDay={openSaveRoutineModal}
+              onDeleteTask={removeScheduledTask}
             />
           </section>
         </div>
 
-        {/* ================= Saved Routines ================= */}
+         {/* ================= Saved Routines ================= */}
         <section className="mt-10 animate-in delay-300">
           <h2 className="text-xl font-semibold text-main mb-4">
             Saved Routines
@@ -177,7 +234,15 @@ export default function RoutineBuilder() {
           {loadingRoutines ? (
             <p className="text-sm text-muted">Loading routines…</p>
           ) : savedRoutines.length === 0 ? (
-  <EmptyState type="routines" onAction={() => setIsModalOpen(true)} />
+            /*
+             * EmptyState is deep in the page — clicking "Create Your First
+             * Routine" here triggers handleOpenModal, which scrolls to the
+             * top first, then opens the modal once the scroll settles.
+             */
+            <EmptyState
+              type="routines"
+              onAction={handleOpenModal}
+            />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {savedRoutines.map((routine) => {
@@ -248,18 +313,28 @@ export default function RoutineBuilder() {
                   </div>
                 );
               })}
+              {savedRoutines.map((routine) => (
+                <RoutineCard
+                  key={routine._id}
+                  routine={routine}
+                  tasks={tasks}
+                  activeRoutine={activeRoutine}
+                  setActiveRoutine={setActiveRoutine}
+                  fetchRoutines={fetchRoutines}
+                />
+              ))}
             </div>
           )}
         </section>
 
+        {/* Task Form Modal */}
         {isModalOpen && (
           <TaskFormModal
             task={null}
-            onClose={() => setIsModalOpen(false)}
+            onClose={closeModal}
             onSubmit={handleSubmit}
           />
         )}
-      </div>
 
       {/* ===== Drag Overlay (floating card while dragging) ===== */}
       <DragOverlay dropAnimation={null}>
@@ -298,33 +373,61 @@ export default function RoutineBuilder() {
               placeholder="Routine name"
               className="w-full mb-4 rounded-xl border-soft px-3 py-2 text-sm focus:outline-none"
             />
+        {/* Save Routine Modal */}
+        {isSaveModalOpen && (
+          <div className="fixed inset-0 bg-black/20 dark:bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 animate-in">
+            <div className="card card-primary w-full max-w-md animate-in delay-100">
+              <h3 className="text-lg font-semibold text-main mb-2">
+                Save {selectedDay} Routine
+              </h3>
 
-            <textarea
-              value={description}
-              onChange={(e)=> setDescription(e.target.value)}
-              placeholder="Add a description (optional)"
-              rows="3"
-              className="w-full mb-4 rounded-lg border-soft px-3 py-2 text-sm focus:ring-primary bg-white resize-none"
-            />
+              <input
+                type="text"
+                value={routineName}
+                onChange={(e) => setRoutineName(e.target.value)}
+                placeholder="Routine name"
+                className="w-full mb-4 rounded-xl border-soft px-3 py-2 text-sm
+                           focus:outline-none bg-transparent text-main"
+              />
 
-            <div className="flex justify-end gap-3">
-              <button
-                className="btn btn-muted"
-                onClick={() => setIsSaveModalOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary cursor-pointer"
-                onClick={confirmSaveRoutine}
-                disabled={!routineName.trim()}
-              >
-                Save Routine
-              </button>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Add a description (optional)"
+                rows="3"
+                className="w-full mb-4 rounded-lg border-soft px-3 py-2 text-sm
+                           focus:ring-primary bg-transparent text-main resize-none"
+              />
+
+              <div className="flex justify-end gap-3">
+                <button
+                  className="btn btn-muted"
+                  onClick={() => setIsSaveModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary cursor-pointer"
+                  onClick={confirmSaveRoutine}
+                  disabled={!routineName.trim()}
+                >
+                  Save Routine
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Drag Overlay */}
+        <DragOverlay dropAnimation={null}>
+          {activeTask ? (
+            <div className="rounded-xl bg-white p-3 shadow-xl border border-gray-200">
+              {activeTask.title}
+            </div>
+          ) : null}
+        </DragOverlay>
+
+      </div>
     </DndContext>
   );
 }
